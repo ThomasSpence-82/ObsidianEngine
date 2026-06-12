@@ -24,12 +24,18 @@
     <ClInclude Include="RHI_Device_DX12.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="DX12Swapchain.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Obsidian.RHI.DX12.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="pch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DX12Swapchain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
