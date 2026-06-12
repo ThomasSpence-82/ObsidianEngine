@@ -2,8 +2,6 @@
 
 //
 // Core DirectX 12 + DXGI headers from the Windows SDK.
-// These are the ONLY headers you need for swapchain + RTV management.
-// No DirectX-Headers package, no d3dx12.h helpers.
 //
 #include <windows.h>
 #include <d3d12.h>
@@ -11,20 +9,17 @@
 #include <wrl/client.h>
 
 //
-// DX12 swapchain + RTV manager
+// DX12 swapchain + RTV/DSV manager
 //
-// This class owns:
-//   - DXGI factory (IDXGIFactory7)
-//   - Swapchain (IDXGISwapChain4)
-//   - RTV descriptor heap
-//   - Back buffer resources
+// Owns:
+//   - DXGI factory
+//   - Swapchain
+//   - RTV heap + back buffers
+//   - DSV heap + depth‑stencil buffer
 //
-// It does NOT own:
-//   - The D3D12 device
-//   - The command queue
-//
-// The device + queue are passed in from the renderer and remain externally owned.
-// This keeps the swapchain lightweight and modular.
+// Does NOT own:
+//   - Device
+//   - Command queue
 //
 namespace Obsidian::RHI::DX12
 {
@@ -33,14 +28,6 @@ namespace Obsidian::RHI::DX12
     class DX12Swapchain
     {
     public:
-
-        //
-        // Constructor
-        // Creates:
-        //   - DXGI factory
-        //   - Swapchain for the given HWND
-        //   - RTV heap + RTVs for each back buffer
-        //
         DX12Swapchain(
             HWND hwnd,
             UINT width,
@@ -48,85 +35,51 @@ namespace Obsidian::RHI::DX12
             ComPtr<ID3D12Device> device,
             ComPtr<ID3D12CommandQueue> queue);
 
-        //
-        // Destructor
-        // Releases:
-        //   - Back buffers
-        //   - RTV heap
-        //   - Swapchain
-        //   - Factory
-        //
         ~DX12Swapchain();
 
-        //
-        // Clear the current back buffer.
-        // Performs:
-        //   - PRESENT → RENDER_TARGET transition
-        //   - ClearRenderTargetView()
-        //   - RENDER_TARGET → PRESENT transition
-        //
+        // Clear current back buffer + depth buffer.
         void Clear(ComPtr<ID3D12GraphicsCommandList> cmdList, const FLOAT color[4]);
 
-        //
-        // Present the current back buffer.
-        // Updates m_frameIndex after presenting.
-        //
+        // Present current back buffer.
         void Present(UINT sync = 1, UINT flags = 0);
 
-        //
-        // Accessors
-        //
+        // Accessors.
         UINT GetFrameIndex() const { return m_frameIndex; }
         ComPtr<ID3D12DescriptorHeap> GetRTVHeap() const { return m_rtvHeap; }
+        ComPtr<ID3D12DescriptorHeap> GetDSVHeap() const { return m_dsvHeap; }
 
     private:
-
-        //
-        // Internal creation helpers
-        //
         void CreateFactory();
         void CreateSwapchain(HWND hwnd, UINT width, UINT height);
         void CreateRTVs();
+        void CreateDepthStencil(UINT width, UINT height);
 
     private:
-
-        //
-        // Number of back buffers.
-        // 2 = double buffering (recommended for most engines).
-        //
         static constexpr UINT FrameCount = 2;
 
-        //
-        // DXGI objects
-        //
-        ComPtr<IDXGIFactory7>     m_factory;
-        ComPtr<IDXGISwapChain4>   m_swapchain;
+        // DXGI objects.
+        ComPtr<IDXGIFactory7>   m_factory;
+        ComPtr<IDXGISwapChain4> m_swapchain;
 
-        //
-        // RTV heap + back buffer resources
-        //
+        // RTV heap + back buffers.
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
         ComPtr<ID3D12Resource>       m_backBuffers[FrameCount];
 
-        //
-        // External device + queue (not owned)
-        //
+        // DSV heap + depth‑stencil buffer.
+        ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+        ComPtr<ID3D12Resource>       m_depthStencil;
+
+        // External device + queue (not owned).
         ComPtr<ID3D12Device>        m_device;
         ComPtr<ID3D12CommandQueue>  m_queue;
 
-        //
-        // Cached descriptor size for RTV heap
-        //
+        // Descriptor size for RTV heap.
         UINT m_rtvDescriptorSize = 0;
 
-        //
-        // Current back buffer index
-        //
+        // Current back buffer index.
         UINT m_frameIndex = 0;
 
-        //
-        // Swapchain dimensions
-        //
+        // Swapchain dimensions.
         UINT m_width = 0;
         UINT m_height = 0;
     };

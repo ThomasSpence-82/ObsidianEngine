@@ -17,7 +17,7 @@ using Microsoft::WRL::ComPtr;
 using Obsidian::RHI::DX12::DX12Swapchain;
 
 // -------------------------------------------------------------------------------------------------
-// Global DX12 objects (bootstrap style; later you can wrap these in a Renderer class).
+// Global DX12 objects.
 // -------------------------------------------------------------------------------------------------
 static ComPtr<ID3D12Device>              g_device;
 static ComPtr<ID3D12CommandQueue>        g_queue;
@@ -25,10 +25,13 @@ static ComPtr<ID3D12CommandAllocator>    g_cmdAlloc;
 static ComPtr<ID3D12GraphicsCommandList> g_cmdList;
 static std::unique_ptr<DX12Swapchain>    g_swapchain;
 
-// Fence objects for GPU/CPU synchronization.
 static ComPtr<ID3D12Fence> g_fence;
 static UINT64              g_fenceValue = 0;
 static HANDLE              g_fenceEvent = nullptr;
+
+// Cache window size for viewport/scissor.
+static UINT g_backbufferWidth = 0;
+static UINT g_backbufferHeight = 0;
 
 // -------------------------------------------------------------------------------------------------
 // Basic Win32 window procedure.
@@ -93,20 +96,20 @@ void InitD3D(HWND hwnd, UINT width, UINT height)
     }
 #endif
 
-    // Device (basic hardware device; later you can use DXGI adapter selection).
+    g_backbufferWidth = width;
+    g_backbufferHeight = height;
+
     DX_CALL(D3D12CreateDevice(
         nullptr,
         D3D_FEATURE_LEVEL_11_0,
         IID_PPV_ARGS(&g_device)));
 
-    // Command queue.
     D3D12_COMMAND_QUEUE_DESC qd = {};
     qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     qd.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 
     DX_CALL(g_device->CreateCommandQueue(&qd, IID_PPV_ARGS(&g_queue)));
 
-    // Command allocator + list.
     DX_CALL(g_device->CreateCommandAllocator(
         D3D12_COMMAND_LIST_TYPE_DIRECT,
         IID_PPV_ARGS(&g_cmdAlloc)));
@@ -118,15 +121,12 @@ void InitD3D(HWND hwnd, UINT width, UINT height)
         nullptr,
         IID_PPV_ARGS(&g_cmdList)));
 
-    // Close initially; we reset per frame.
     DX_CALL(g_cmdList->Close());
 
-    // Fence + event for GPU sync.
     DX_CALL(g_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence)));
     g_fenceValue = 0;
     g_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
-    // Swapchain wrapper.
     g_swapchain = std::make_unique<DX12Swapchain>(
         hwnd,
         width,
@@ -151,28 +151,41 @@ void WaitForGPU()
 }
 
 // -------------------------------------------------------------------------------------------------
-// Render a single frame: reset, clear, execute, wait, present.
+// Render a single frame: viewport, scissor, reset, clear, execute, wait, present.
 // -------------------------------------------------------------------------------------------------
 void RenderFrame()
 {
-    // Reset allocator and command list.
     DX_CALL(g_cmdAlloc->Reset());
     DX_CALL(g_cmdList->Reset(g_cmdAlloc.Get(), nullptr));
+
+    // Viewport.
+    D3D12_VIEWPORT viewport = {};
+    viewport.TopLeftX = 0.0f;
+    viewport.TopLeftY = 0.0f;
+    viewport.Width = static_cast<float>(g_backbufferWidth);
+    viewport.Height = static_cast<float>(g_backbufferHeight);
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    g_cmdList->RSSetViewports(1, &viewport);
+
+    // Scissor rect.
+    D3D12_RECT scissor = {};
+    scissor.left = 0;
+    scissor.top = 0;
+    scissor.right = static_cast<LONG>(g_backbufferWidth);
+    scissor.bottom = static_cast<LONG>(g_backbufferHeight);
+    g_cmdList->RSSetScissorRects(1, &scissor);
 
     // Clear current back buffer (handles PRESENT ↔ RENDER_TARGET transitions).
     const FLOAT clearColor[4] = { 0.1f, 0.1f, 0.3f, 1.0f };
     g_swapchain->Clear(g_cmdList, clearColor);
 
-    // Close and execute.
     DX_CALL(g_cmdList->Close());
 
     ID3D12CommandList* lists[] = { g_cmdList.Get() };
     g_queue->ExecuteCommandLists(1, lists);
 
-    // Wait for GPU to finish this frame before presenting.
     WaitForGPU();
-
-    // Present the frame.
     g_swapchain->Present(1, 0);
 }
 
@@ -181,7 +194,6 @@ void RenderFrame()
 // -------------------------------------------------------------------------------------------------
 void ShutdownD3D()
 {
-    // Ensure GPU has finished all work.
     WaitForGPU();
 
     g_swapchain.reset();

@@ -1,13 +1,11 @@
-#include "pch.h"                 // Precompiled header (VS setting)
+#include "pch.h"
 #include "DX12Swapchain.h"
 
-#include <stdexcept>             // std::runtime_error
-#include <windows.h>             // HWND, Win32 types
-#include <d3d12.h>               // Core D3D12 types
-#include <dxgi1_6.h>             // DXGI interfaces
+#include <stdexcept>
+#include <windows.h>
+#include <d3d12.h>
+#include <dxgi1_6.h>
 
-// Simple HRESULT check macro.
-// In a production engine you’d route this through your logging/assert system.
 #ifndef DX_CALL
 #define DX_CALL(x) do { HRESULT _hr = (x); if (FAILED(_hr)) throw std::runtime_error("DX12 call failed: " #x); } while(0)
 #endif
@@ -16,7 +14,7 @@ using namespace Obsidian::RHI::DX12;
 using Microsoft::WRL::ComPtr;
 
 // -------------------------------------------------------------------------------------------------
-// Constructor: stores device/queue, creates factory, swapchain, and RTVs.
+// Constructor: stores device/queue, creates factory, swapchain, RTVs, and depth‑stencil.
 // -------------------------------------------------------------------------------------------------
 DX12Swapchain::DX12Swapchain(
     HWND hwnd,
@@ -32,17 +30,19 @@ DX12Swapchain::DX12Swapchain(
     CreateFactory();
     CreateSwapchain(hwnd, width, height);
     CreateRTVs();
+    CreateDepthStencil(width, height);
 }
 
 // -------------------------------------------------------------------------------------------------
-// Destructor: release back buffers, heap, swapchain, factory.
-// Device/queue are external and not owned here.
+// Destructor: release back buffers, depth buffer, heaps, swapchain, factory.
 // -------------------------------------------------------------------------------------------------
 DX12Swapchain::~DX12Swapchain()
 {
     for (auto& bb : m_backBuffers)
         bb.Reset();
 
+    m_depthStencil.Reset();
+    m_dsvHeap.Reset();
     m_rtvHeap.Reset();
     m_swapchain.Reset();
     m_factory.Reset();
@@ -79,16 +79,15 @@ void DX12Swapchain::CreateSwapchain(HWND hwnd, UINT width, UINT height)
     ComPtr<IDXGISwapChain1> temp;
 
     DX_CALL(m_factory->CreateSwapChainForHwnd(
-        m_queue.Get(),   // command queue
-        hwnd,            // target window
-        &desc,           // swapchain description
-        nullptr,         // fullscreen desc (unused)
-        nullptr,         // restrict output (unused)
+        m_queue.Get(),
+        hwnd,
+        &desc,
+        nullptr,
+        nullptr,
         &temp));
 
     DX_CALL(temp.As(&m_swapchain));
 
-    // Cache current back buffer index.
     m_frameIndex = m_swapchain->GetCurrentBackBufferIndex();
 }
 
@@ -97,7 +96,6 @@ void DX12Swapchain::CreateSwapchain(HWND hwnd, UINT width, UINT height)
 // -------------------------------------------------------------------------------------------------
 void DX12Swapchain::CreateRTVs()
 {
-    // Describe and create the RTV descriptor heap.
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
     heapDesc.NumDescriptors = FrameCount;
     heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -105,28 +103,84 @@ void DX12Swapchain::CreateRTVs()
 
     DX_CALL(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_rtvHeap)));
 
-    // Cache descriptor size for RTV heap.
     m_rtvDescriptorSize =
         m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-    // Get the starting CPU handle for the heap.
     D3D12_CPU_DESCRIPTOR_HANDLE handle =
         m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
 
-    // Create an RTV for each back buffer.
     for (UINT i = 0; i < FrameCount; i++)
     {
         DX_CALL(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&m_backBuffers[i])));
         m_device->CreateRenderTargetView(m_backBuffers[i].Get(), nullptr, handle);
-
-        // Move handle to the next descriptor slot.
         handle.ptr += m_rtvDescriptorSize;
     }
 }
 
 // -------------------------------------------------------------------------------------------------
-// Clear: transition PRESENT → RENDER_TARGET, clear, then RENDER_TARGET → PRESENT.
-// This keeps Present() happy and avoids invalid resource state crashes.
+// Create depth‑stencil buffer + DSV heap.
+// -------------------------------------------------------------------------------------------------
+void DX12Swapchain::CreateDepthStencil(UINT width, UINT height)
+{
+    // Describe the depth‑stencil texture.
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Alignment = 0;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_D32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    // Clear value for depth.
+    D3D12_CLEAR_VALUE clearValue = {};
+    clearValue.Format = DXGI_FORMAT_D32_FLOAT;
+    clearValue.DepthStencil.Depth = 1.0f;
+    clearValue.DepthStencil.Stencil = 0;
+
+    // Heap properties for a default GPU resource.
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+    heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    heapProps.CreationNodeMask = 1;
+    heapProps.VisibleNodeMask = 1;
+
+    // Create the depth‑stencil resource.
+    DX_CALL(m_device->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        &clearValue,
+        IID_PPV_ARGS(&m_depthStencil)));
+
+    // Create DSV heap.
+    D3D12_DESCRIPTOR_HEAP_DESC dsvDesc = {};
+    dsvDesc.NumDescriptors = 1;
+    dsvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    dsvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+
+    DX_CALL(m_device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&m_dsvHeap)));
+
+    // Create the DSV.
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvView = {};
+    dsvView.Format = DXGI_FORMAT_D32_FLOAT;
+    dsvView.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvView.Flags = D3D12_DSV_FLAG_NONE;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
+        m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+
+    m_device->CreateDepthStencilView(m_depthStencil.Get(), &dsvView, dsvHandle);
+}
+
+// -------------------------------------------------------------------------------------------------
+// Clear: transition PRESENT → RENDER_TARGET, clear color + depth, then back.
 // -------------------------------------------------------------------------------------------------
 void DX12Swapchain::Clear(ComPtr<ID3D12GraphicsCommandList> cmdList, const FLOAT color[4])
 {
@@ -143,16 +197,29 @@ void DX12Swapchain::Clear(ComPtr<ID3D12GraphicsCommandList> cmdList, const FLOAT
         cmdList->ResourceBarrier(1, &barrier);
     }
 
-    // Compute RTV handle for current back buffer.
+    // RTV handle for current back buffer.
     D3D12_CPU_DESCRIPTOR_HANDLE rtv =
         m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
     rtv.ptr += static_cast<SIZE_T>(m_frameIndex) * m_rtvDescriptorSize;
 
-    // Bind and clear.
-    cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-    cmdList->ClearRenderTargetView(rtv, color, 0, nullptr);
+    // DSV handle (single depth buffer).
+    D3D12_CPU_DESCRIPTOR_HANDLE dsv =
+        m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
 
-    // Transition back to PRESENT so the swapchain can present safely.
+    // Bind RTV + DSV.
+    cmdList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+
+    // Clear color + depth.
+    cmdList->ClearRenderTargetView(rtv, color, 0, nullptr);
+    cmdList->ClearDepthStencilView(
+        dsv,
+        D3D12_CLEAR_FLAG_DEPTH,
+        1.0f,
+        0,
+        0,
+        nullptr);
+
+    // Transition back to PRESENT.
     {
         D3D12_RESOURCE_BARRIER barrier = {};
         barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -168,7 +235,6 @@ void DX12Swapchain::Clear(ComPtr<ID3D12GraphicsCommandList> cmdList, const FLOAT
 
 // -------------------------------------------------------------------------------------------------
 // Present: call DXGI Present and update frame index.
-// Any failure here will throw via DX_CALL.
 // -------------------------------------------------------------------------------------------------
 void DX12Swapchain::Present(UINT sync, UINT flags)
 {
