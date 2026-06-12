@@ -173,6 +173,14 @@
       <Project>{79fd6239-cdcc-4f26-be86-2e1540810b76}</Project>
     </ProjectReference>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\TrianglePS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+    <None Include="Shaders\TriangleVS.hlsl">
+      <FileType>Document</FileType>
+    </None>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
