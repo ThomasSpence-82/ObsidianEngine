@@ -29,6 +29,9 @@ static ComPtr<ID3D12Fence> g_fence;
 static UINT64              g_fenceValue = 0;
 static HANDLE              g_fenceEvent = nullptr;
 
+// NEW: Root signature
+static ComPtr<ID3D12RootSignature> g_rootSignature;
+
 // Cache window size for viewport/scissor.
 static UINT g_backbufferWidth = 0;
 static UINT g_backbufferHeight = 0;
@@ -84,7 +87,46 @@ HWND CreateMainWindow(HINSTANCE hInstance, int width, int height)
 }
 
 // -------------------------------------------------------------------------------------------------
-// Initialize D3D12 device, queue, command allocator/list, fence, and swapchain.
+// Create an empty root signature (valid for basic triangle rendering).
+// -------------------------------------------------------------------------------------------------
+void CreateRootSignature()
+{
+    // Empty root signature (no parameters).
+    D3D12_ROOT_SIGNATURE_DESC desc = {};
+    desc.NumParameters = 0;
+    desc.pParameters = nullptr;
+    desc.NumStaticSamplers = 0;
+    desc.pStaticSamplers = nullptr;
+    desc.Flags =
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    // Serialize the root signature.
+    ComPtr<ID3DBlob> serialized;
+    ComPtr<ID3DBlob> error;
+
+    HRESULT hr = D3D12SerializeRootSignature(
+        &desc,
+        D3D_ROOT_SIGNATURE_VERSION_1,
+        &serialized,
+        &error);
+
+    if (FAILED(hr))
+    {
+        if (error)
+            OutputDebugStringA((char*)error->GetBufferPointer());
+        DX_CALL(hr);
+    }
+
+    // Create the root signature.
+    DX_CALL(g_device->CreateRootSignature(
+        0,
+        serialized->GetBufferPointer(),
+        serialized->GetBufferSize(),
+        IID_PPV_ARGS(&g_rootSignature)));
+}
+
+// -------------------------------------------------------------------------------------------------
+// Initialize D3D12 device, queue, command allocator/list, fence, swapchain, and root signature.
 // -------------------------------------------------------------------------------------------------
 void InitD3D(HWND hwnd, UINT width, UINT height)
 {
@@ -127,12 +169,16 @@ void InitD3D(HWND hwnd, UINT width, UINT height)
     g_fenceValue = 0;
     g_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
+    // Create swapchain
     g_swapchain = std::make_unique<DX12Swapchain>(
         hwnd,
         width,
         height,
         g_device,
         g_queue);
+
+    // NEW: Create root signature
+    CreateRootSignature();
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -209,6 +255,7 @@ void ShutdownD3D()
     }
 
     g_fence.Reset();
+    g_rootSignature.Reset();
 }
 
 // -------------------------------------------------------------------------------------------------
