@@ -1,0 +1,18 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Obsidan.Scene/Obsidan.Scene.vcxproj" Id="36bac492-f726-43fa-98fd-3fc737c938f3" />
+  <Project Path="Obsidian.Core/Obsidian.Core.vcxproj" Id="93913938-724a-49b9-b9df-fbb5e56eb4dd" />
+  <Project Path="Obsidian.Editor/Obsidian.Editor.csproj" />
+  <Project Path="Obsidian.RHI.DX12/Obsidian.RHI.DX12.vcxproj" Id="79fd6239-cdcc-4f26-be86-2e1540810b76" />
+  <Project Path="Obsidian.RHI/Obsidian.RHI.vcxproj" Id="2c3ab540-1299-4717-b98c-15e214917efa" />
+  <Project Path="Obsidian.Runtime/Obsidian.Runtime.vcxproj" Id="4b1a0d47-e56c-4d46-ab08-02ba7182f959">
+    <BuildDependency Project="Obsidan.Scene/Obsidan.Scene.vcxproj" />
+    <BuildDependency Project="Obsidian.Core/Obsidian.Core.vcxproj" />
+    <BuildDependency Project="Obsidian.RHI.DX12/Obsidian.RHI.DX12.vcxproj" />
+    <BuildDependency Project="Obsidian.RHI/Obsidian.RHI.vcxproj" />
+  </Project>
+</Solution>
